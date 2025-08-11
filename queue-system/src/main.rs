@@ -1,12 +1,11 @@
 use std::{
-    os::unix::thread::JoinHandleExt,
     sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
 
 struct ThreadPool {
-    sender: Option<mpsc::Sender<Message>>,
+    sender: mpsc::Sender<Message>,
     workers: Vec<thread::JoinHandle<()>>,
 }
 
@@ -29,6 +28,7 @@ impl ThreadPool {
             workers.push(thread::spawn(move || {
                 loop {
                     let message = r.lock().unwrap().recv().expect("Failed to receive message");
+                    println!("Worker received a message");
                     match message {
                         Message::NewJob(job) => job(),
                         Message::Terminate => break,
@@ -37,32 +37,21 @@ impl ThreadPool {
             }));
         }
 
-        ThreadPool {
-            sender: Some(sender),
-            workers,
-        }
+        ThreadPool { sender, workers }
     }
 
     fn execute<F>(&mut self, task: F)
     where
         F: FnOnce() + Send + 'static,
     {
-        self.sender
-            .as_ref()
-            .unwrap()
-            .send(Message::NewJob(Box::new(task)))
-            .unwrap();
+        self.sender.send(Message::NewJob(Box::new(task))).unwrap();
         println!("Task added to the pool");
     }
 
     fn shutdown(self) {
         println!("Sending termination messages to workers");
         for _ in &self.workers {
-            self.sender
-                .as_ref()
-                .unwrap()
-                .send(Message::Terminate)
-                .unwrap();
+            self.sender.send(Message::Terminate).unwrap();
         }
 
         for worker in self.workers {
@@ -75,12 +64,12 @@ impl ThreadPool {
 }
 
 fn main() {
-    let mut pool = ThreadPool::new(2);
+    let mut pool = ThreadPool::new(1);
 
     for i in 0..6 {
         let task = move || {
             println!("Task {} is running", i);
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_secs(5));
             println!("Task {} completed", i);
         };
         pool.execute(task);
